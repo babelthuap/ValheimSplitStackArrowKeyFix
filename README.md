@@ -1,0 +1,1 @@
+Fixes the annoying double-increment bug in Valheim's split stack menu. Now you can use the arrow keys to select the correct amount.
