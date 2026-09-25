@@ -11,7 +11,7 @@ namespace SplitStackArrowKeyFix
     {
         public const string PluginGUID = "com.babelthuap.splitstackarrowkeyfix";
         public const string PluginName = "SplitStackArrowKeyFix";
-        public const string PluginVersion = "1.1.0";
+        public const string PluginVersion = "1.1.1";
 
         private readonly Harmony harmony = new(PluginGUID);
 
@@ -48,29 +48,57 @@ namespace SplitStackArrowKeyFix
         }
     }
 
+    public static class SplitDialogState
+    {
+        public static float LastClosedTime = -10f;
+    }
+
+    [HarmonyPatch(typeof(InventoryGui), "OnSplitOk")]
+    public static class InventoryGui_OnSplitOk_Patch
+    {
+        public static void Prefix() => SplitDialogState.LastClosedTime = Time.unscaledTime;
+    }
+
+    [HarmonyPatch(typeof(InventoryGui), "OnSplitCancel")]
+    public static class InventoryGui_OnSplitCancel_Patch
+    {
+        public static void Prefix() => SplitDialogState.LastClosedTime = Time.unscaledTime;
+    }
+
     [HarmonyPatch(typeof(InventoryGui), "UpdateSplitDialog")]
     public static class InventoryGui_UpdateSplitDialog_Patch
     {
         private const float RepeatDelay = 0.5f;
         private const float RepeatRate = 0.05f;
-        
+
         private static float aHoldTime = 0f;
         private static float dHoldTime = 0f;
         private static float nextRepeatTime = 0f;
 
-        public static bool Prefix()
+        public static bool Prefix(InventoryGui __instance)
         {
-            bool usingArrows = Input.GetKey(KeyCode.LeftArrow) || Input.GetKey(KeyCode.RightArrow);
-            bool usingAD = Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.D);
+            GameObject splitDialogGo = SplitDialogHelper.GetSplitDialog();
 
-            if (usingAD)
+            if (splitDialogGo != null && splitDialogGo.activeInHierarchy)
             {
-                GameObject splitDialogGo = SplitDialogHelper.GetSplitDialog();
+                if (Input.GetKeyDown(KeyCode.Space))
+                {
+                    MethodInfo onSplitOkMethod = AccessTools.Method(typeof(InventoryGui), "OnSplitOk");
+                    if (onSplitOkMethod != null)
+                    {
+                        SplitDialogState.LastClosedTime = Time.unscaledTime;
+                        onSplitOkMethod.Invoke(__instance, null);
+                        return false;
+                    }
+                }
 
-                if (splitDialogGo != null && splitDialogGo.activeInHierarchy)
+                bool usingArrows = Input.GetKey(KeyCode.LeftArrow) || Input.GetKey(KeyCode.RightArrow);
+                bool usingAD = Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.D);
+
+                if (usingAD)
                 {
                     Slider splitSlider = splitDialogGo.GetComponentInChildren<Slider>(true);
-                    
+
                     if (splitSlider != null)
                     {
                         float deltaTime = Time.unscaledDeltaTime;
@@ -107,16 +135,16 @@ namespace SplitStackArrowKeyFix
                         }
                     }
                 }
-            }
-            else
-            {
-                aHoldTime = 0f;
-                dHoldTime = 0f;
-            }
+                else
+                {
+                    aHoldTime = 0f;
+                    dHoldTime = 0f;
+                }
 
-            if (usingArrows || usingAD)
-            {
-                return false;
+                if (usingArrows || usingAD)
+                {
+                    return false;
+                }
             }
 
             return true;
@@ -124,19 +152,37 @@ namespace SplitStackArrowKeyFix
     }
 
     // Suppress character movement when the Split Dialog is open
-    [HarmonyPatch(typeof(ZInput), "GetButton")]
-    public static class ZInput_GetButton_Patch
+    [HarmonyPatch(typeof(ZInput))]
+    public static class ZInput_Patch
     {
+        [HarmonyPatch("GetButton")]
+        [HarmonyPatch("GetButtonDown")]
+        [HarmonyPatch("GetButtonUp")]
+        [HarmonyPrefix]
         public static bool Prefix(string name, ref bool __result)
         {
-            if (name == "Forward" || name == "Backward" || name == "Left" || name == "Right")
+            bool isMovement = name == "Forward" || name == "Backward" || name == "Left" || name == "Right" || name == "Jump";
+
+            if (isMovement && (SplitDialogHelper.IsSplitDialogOpen() || Time.unscaledTime <= SplitDialogState.LastClosedTime + 0.25f))
             {
-                if (SplitDialogHelper.IsSplitDialogOpen())
-                {
-                    __result = false;
-                    return false;
-                }
+                __result = false;
+                return false;
             }
+
+            return true;
+        }
+    }
+
+    [HarmonyPatch(typeof(Character), "Jump")]
+    public static class Character_Jump_Patch
+    {
+        public static bool Prefix(Character __instance)
+        {
+            if (__instance == Player.m_localPlayer && (SplitDialogHelper.IsSplitDialogOpen() || Time.unscaledTime <= SplitDialogState.LastClosedTime + 0.25f))
+            {
+                return false;
+            }
+
             return true;
         }
     }
